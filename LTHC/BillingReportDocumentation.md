@@ -144,6 +144,7 @@ If chronicConditionCount ≥ 2 AND patient is Medicare:
 | Code | Type | Time Required | Description |
 |------|------|---------------|-------------|
 | 99490 | Base (Tier 0) | 20 minutes | Standard CCM, minimum 20 min |
+| 99439 | Addon (Tier 0) | 20 min increments | Standard CCM, each additional 20 min |
 | 99487 | Base (Tier 1) | 60 minutes | Complex CCM, first 60 min |
 | 99489 | Addon (Tier 1) | 30 min increments | Complex CCM, each additional 30 min |
 | G0556 | APCM | < 20 minutes | Under-threshold, 0-1 chronic conditions |
@@ -152,24 +153,33 @@ If chronicConditionCount ≥ 2 AND patient is Medicare:
 **Example Scenarios**:
 - **15 minutes**: → G0557 (if patient has 2+ conditions)
 - **25 minutes**: → 99490 (base tier 0)
+- **45 minutes**: → 99490 + 1x 99439 (tier 0 base + 1 addon)
 - **65 minutes**: → 99487 (upgrades to tier 1)
 - **125 minutes**: → 99487 + 2x 99489 (tier 1 base + 2 addons)
 
 ### CCM (QHP) - Qualified Health Professional
 | Code | Type | Time Required | Description |
 |------|------|---------------|-------------|
-| 99437 | Addon | 30 min increments | QHP addon code only |
-| G0556 | APCM | Any time logged | Under-threshold, 0-1 chronic conditions |
-| G0557 | APCM | Any time logged | Under-threshold, 2+ chronic conditions |
+| 99491 | Base | 30 minutes | CCM by physician/QHP, first 30 min |
+| 99437 | Addon | 30 min increments | CCM by physician/QHP, each additional 30 min |
+| G0556 | APCM | < 30 minutes | Under-threshold, 0-1 chronic conditions |
+| G0557 | APCM | < 30 minutes | Under-threshold, 2+ chronic conditions |
 
-**Note**: CCM (QHP) has no base code, only addon. APCM codes apply for any logged time.
+**Example Scenarios**:
+- **15 minutes**: → G0557 (if patient has 2+ conditions)
+- **35 minutes**: → 99491 (base only)
+- **65 minutes**: → 99491 + 1x 99437 (base + 1 addon)
 
 ### PCM (Principal Care Management)
 | Code | Type | Time Required | Description |
 |------|------|---------------|-------------|
-| 99427 | Addon | 30 min increments | PCM addon code only |
+| 99426 | Base | 30 minutes | PCM by clinical staff, first 30 min |
+| 99427 | Addon | 30 min increments | PCM by clinical staff, each additional 30 min |
 
-**Note**: PCM has no base code configured, only addon code
+**Example Scenarios**:
+- **25 minutes**: → No code (below 30 min minimum)
+- **35 minutes**: → 99426 (base only)
+- **65 minutes**: → 99426 + 1x 99427 (base + 1 addon)
 
 ### PCM (QHP) - Qualified Health Professional
 | Code | Type | Time Required | Description |
@@ -263,8 +273,9 @@ Else:
 | Time (min) | Default Behavior | With stayLowerCodeUntilAddon |
 |------------|------------------|------------------------------|
 | 19 or less | APCM (G0556/G0557) | APCM (G0556/G0557) |
-| 20-59 | 99490 (tier 0 base) | 99490 (tier 0 base) |
-| 60-89 | 99487 (tier 1 base) | 99490 (stays tier 0) |
+| 20-39 | 99490 | 99490 |
+| 40-59 | 99490 + 1x 99439 | 99490 + 1x 99439 |
+| 60-89 | 99487 | 99490 + 2x 99439 |
 | 90-119 | 99487 + 1x 99489 | 99487 + 1x 99489 |
 | 120-149 | 99487 + 2x 99489 | 99487 + 2x 99489 |
 | 150+ | 99487 + 3x 99489 | 99487 + 3x 99489 |
@@ -516,6 +527,83 @@ See the dedicated section above for detailed examples and business logic.
 - **1753300000004**: Seeds initial billing CPT codes
 - **1758814806340**: Comprehensive CPT code configuration fix
 - **1759175638214**: Converts timer_category_id to array format
+
+---
+
+## Complete CPT Code Assignment Tables by Time
+
+### Table 1: Default Behavior (stayLowerCodeUntilAddon = false)
+
+This table shows which CPT codes are assigned for different amounts of time across all timer categories.
+
+| Time Range | CCM | CCM (QHP) | PCM | PCM (QHP) |
+|------------|-----|-----------|-----|-----------|
+| **0-19 min** | G0556/G0557* | G0556/G0557* | No code | No code |
+| **20-29 min** | 99490 | G0556/G0557* | No code | No code |
+| **30-39 min** | 99490 | 99491 | 99426 | 99424 |
+| **40-59 min** | 99490 + 1x 99439 | 99491 | 99426 | 99424 |
+| **60-79 min** | 99487 | 99491 + 1x 99437 | 99426 + 1x 99427 | 99424 + 1x 99425 |
+| **80-89 min** | 99487 | 99491 + 1x 99437 | 99426 + 1x 99427 | 99424 + 1x 99425 |
+| **90-119 min** | 99487 + 1x 99489 | 99491 + 2x 99437 | 99426 + 2x 99427 | 99424 + 2x 99425 |
+| **120-149 min** | 99487 + 2x 99489 | 99491 + 3x 99437 | 99426 + 3x 99427 | 99424 + 3x 99425 |
+| **150-179 min** | 99487 + 3x 99489 | 99491 + 4x 99437 | 99426 + 4x 99427 | 99424 + 4x 99425 |
+| **180-209 min** | 99487 + 4x 99489 | 99491 + 5x 99437 | 99426 + 5x 99427 | 99424 + 5x 99425 |
+| **210-239 min** | 99487 + 5x 99489 | 99491 + 6x 99437 | 99426 + 6x 99427 | 99424 + 6x 99425 |
+| **240-269 min** | 99487 + 6x 99489 | 99491 + 7x 99437 | 99426 + 7x 99427 | 99424 + 7x 99425 |
+
+**Notes**:
+- \* G0556 for patients with 0-1 chronic conditions, G0557 for patients with 2+ chronic conditions
+- APCM codes apply to CCM and CCM (QHP) when time is below base code minimum
+- All categories use 30-minute addon increments except CCM tier 0 which uses 20-minute increments
+- CCM has tiered billing: tier 0 (99490/99439) and tier 1 (99487/99489)
+
+---
+
+### Table 2: With stayLowerCodeUntilAddon = true
+
+This table shows how CPT code assignment changes when the `stayLowerCodeUntilAddon` feature is enabled.
+
+| Time Range | CCM | CCM (QHP) | PCM | PCM (QHP) |
+|------------|-----|-----------|-----|-----------|
+| **0-19 min** | G0556/G0557* | G0556/G0557* | No code | No code |
+| **20-29 min** | 99490 | G0556/G0557* | No code | No code |
+| **30-39 min** | 99490 | 99491 | 99426 | 99424 |
+| **40-59 min** | 99490 + 1x 99439 | 99491 | 99426 | 99424 |
+| **60-79 min** | **99490 + 2x 99439** | 99491 + 1x 99437 | 99426 + 1x 99427 | 99424 + 1x 99425 |
+| **80-89 min** | **99490 + 3x 99439** | 99491 + 1x 99437 | 99426 + 1x 99427 | 99424 + 1x 99425 |
+| **90-119 min** | 99487 + 1x 99489 | 99491 + 2x 99437 | 99426 + 2x 99427 | 99424 + 2x 99425 |
+| **120-149 min** | 99487 + 2x 99489 | 99491 + 3x 99437 | 99426 + 3x 99427 | 99424 + 3x 99425 |
+| **150-179 min** | 99487 + 3x 99489 | 99491 + 4x 99437 | 99426 + 4x 99427 | 99424 + 4x 99425 |
+| **180-209 min** | 99487 + 4x 99489 | 99491 + 5x 99437 | 99426 + 5x 99427 | 99424 + 5x 99425 |
+| **210-239 min** | 99487 + 5x 99489 | 99491 + 6x 99437 | 99426 + 6x 99427 | 99424 + 6x 99425 |
+| **240-269 min** | 99487 + 6x 99489 | 99491 + 7x 99437 | 99426 + 7x 99427 | 99424 + 7x 99425 |
+
+**Key Differences** (highlighted in bold):
+- **60-79 min CCM**: Stays on tier 0 (99490 + 2x 99439) instead of upgrading to tier 1 (99487)
+- **80-89 min CCM**: Stays on tier 0 (99490 + 3x 99439) instead of upgrading to tier 1 (99487)
+- At 90+ minutes CCM switches to tier 1 because there's enough time for 99487 base + at least 1x 99489 addon
+- All other categories remain unchanged (only CCM has multiple tiers)
+
+---
+
+### Time Increment Reference
+
+For quick reference, here are the time increments for each CPT code:
+
+| CPT Code | Category | Type | Time Increment |
+|----------|----------|------|----------------|
+| 99490 | CCM | Base (Tier 0) | 20 minutes |
+| 99439 | CCM | Addon (Tier 0) | 20 minutes |
+| 99487 | CCM | Base (Tier 1) | 60 minutes |
+| 99489 | CCM | Addon (Tier 1) | 30 minutes |
+| 99491 | CCM (QHP) | Base | 30 minutes |
+| 99437 | CCM (QHP) | Addon | 30 minutes |
+| 99426 | PCM | Base | 30 minutes |
+| 99427 | PCM | Addon | 30 minutes |
+| 99424 | PCM (QHP) | Base | 30 minutes |
+| 99425 | PCM (QHP) | Addon | 30 minutes |
+| G0556 | CCM/CCM (QHP) | APCM | No time requirement |
+| G0557 | CCM/CCM (QHP) | APCM | No time requirement |
 
 ---
 
