@@ -111,7 +111,7 @@ After applying the base code, calculate addons:
 2. Divide remaining time by addon increment
 3. Apply addon code that many times (rounded down)
 
-**Example**: 125 minutes of Complex CCM time
+**Example**: 125 minutes of CCM time
 - Base code 99487 = 60 minutes
 - Remaining time = 125 - 60 = 65 minutes
 - Addon increment = 30 minutes
@@ -578,11 +578,14 @@ This table shows how CPT code assignment changes when the `stayLowerCodeUntilAdd
 | **210-239 min** | 99487 + 5x 99489 | 99491 + 6x 99437 | 99426 + 6x 99427 | 99424 + 6x 99425 |
 | **240-269 min** | 99487 + 6x 99489 | 99491 + 7x 99437 | 99426 + 7x 99427 | 99424 + 7x 99425 |
 
-**Key Differences** (highlighted in bold):
+**Notes**:
+- CCM has tiered billing: tier 0 (99490/99439) and tier 1 (99487/99489)
 - **60-79 min CCM**: Stays on tier 0 (99490 + 2x 99439) instead of upgrading to tier 1 (99487)
 - **80-89 min CCM**: Stays on tier 0 (99490 + 3x 99439) instead of upgrading to tier 1 (99487)
 - At 90+ minutes CCM switches to tier 1 because there's enough time for 99487 base + at least 1x 99489 addon
-- All other categories remain unchanged (only CCM has multiple tiers)
+- \* G0556 for patients with 0-1 chronic conditions, G0557 for patients with 2+ chronic conditions
+- APCM codes apply to CCM and CCM (QHP) when time is below base code minimum
+- All categories use 30-minute addon increments except CCM tier 0 which uses 20-minute increments
 
 ---
 
