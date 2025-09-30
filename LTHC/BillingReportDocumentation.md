@@ -56,7 +56,7 @@ CPT (Current Procedural Terminology) codes are standardized billing codes used t
 - Selection based on patient's number of chronic conditions:
   - **G0556**: Patients with 0 or 1 chronic conditions
   - **G0557**: Patients with 2 or more chronic conditions
-  - **G0558**: Medicare patients with 2 or more chronic conditions (not yet implemented)
+  - **G0558**: Medicare patients with 2 or more chronic conditions (medicare beneficiaries not yet tracked by Platinum Line)
 
 ---
 
