@@ -34,6 +34,8 @@ Add phone and SMS capabilities to Platinum Line through managed phone number poo
 
 ### Mock-ups
 
+[CC Platinum Line Figma](https://www.figma.com/design/rVORtmqIMrMbf5tk7Btpbb/LTHC-Mockup?node-id=0-1&t=NgSuAK66aGqHEiqp-1)
+
 - New SMS threads and unified SMS inbox for unread/unassigned external threads
 <img width="349" height="737" alt="Screenshot 2025-10-22 at 19 55 40" src="https://github.com/user-attachments/assets/4248d0cd-2e27-4a4a-9a48-8dd0f65bc1f7" />
 
