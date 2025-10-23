@@ -264,7 +264,7 @@ export class VoipSettings {
      - `sender_id` = null (external sender)
      - `content` = SMS body
      - `meta_data` = { provider_message_id, from/to numbers, delivery status }
-   - Start/reset escalation timer (20 min)
+   - Start escalation timer for this thread, if not already running (20 min)
    - Trigger push notifications to enabled clinicians
    - Broadcast via Socket.IO (ChatGateway)
 
