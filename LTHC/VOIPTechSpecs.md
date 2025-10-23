@@ -302,7 +302,7 @@ export class VoipSettings {
    - POST `/api/external-threads/{id}/messages`
    - Backend selects `from_number`:
      - Use `thread.from_contact` if set (consistency)
-     - Otherwise use number recipient last contacted
+     - Otherwise use number recipient last contacted, and set thread.from_contact to that number
    - Call TelephonyService.sendSms()
    - Create message record:
      - `message_type` = 'sms'
@@ -324,11 +324,14 @@ export class VoipSettings {
 
    - Clinician clicks "Call" button in thread
    - Modal asks for:
-     - Clinician's phone number (E.164)
+     - Clinician's phone number (E.164) (defaults to number stored in profile)
      - Caller ID to display (dropdown from `phone_numbers`)
    - POST `/api/external-threads/{id}/bridge-call`
 
 2. **Backend**
+
+#### Needs updating to use call bridging, not automatic calling of clinician most likely!!
+
    - Call TelephonyService.initiateBridgeCall()
    - Provider initiates two-leg call:
      - **Leg A**: Call clinician (private/restricted caller ID)
@@ -344,16 +347,16 @@ export class VoipSettings {
 ### Thread Organization
 
 - **Patient Linking**: UI allows searching/linking multiple patients → updates `patient_ids` array
-- **Facility Linking**: Dropdown to set `facility_id`
+- **Facility Linking**: Dropdown to set `facility_id`, null if patient_ids has a value.
 - **Contact Naming**: Assign friendly name → updates `contact_name`
-- **Assignment**: Use `assignee_id` (same as patient threads)
-- **Status**: 'open', 'resolved', 'closed' (filters default view)
+- **Assignment**: Use `assignee_id` (same as patient threads) (**TODO** research current implementation in threads)
+- **Status**: 'open', 'resolved', 'closed' (filters default view) (**TODO** research current implementation in threads)
 
 ### Viewing Threads
 
 - **From Patient**: Query `WHERE patient_ids @> ARRAY[patient_id]`
 - **From Facility**: Query `WHERE facility_id = X`
-- **Unified Inbox**: UNION query combining patient threads + external threads, sorted by last message
+- **Unified Inbox**: UNION query combining unassigned external threads and all external threads with unread messages, sorted by last message
 
 ---
 
@@ -363,12 +366,14 @@ export class VoipSettings {
 
 - **Trigger**: Unread message arrives in external thread
 - **Duration**: 20 minutes (configurable via `voip_settings`)
-- **Reset Actions**: Clinician reads thread, sends reply, or resolves thread
-- **Escalation Fired**: Send SMS to all `escalation_phone_numbers` with message preview + deep link
+- **Reset Actions**: Clinician sends reply or places call
+- **Escalation Fired**: Send SMS to all `escalation_phone_numbers` with message preview + deep link, add message to thread alerting that escalation group was notified
 
 ### Configuration
 
 Admin UI to manage:
+
+(**TODO** research existing system settings implementation, if any)
 
 - `escalation_timer_minutes`
 - `escalation_phone_numbers` (array)
@@ -384,9 +389,9 @@ Admin UI to manage:
 - **Socket.IO**: Reuse ChatGateway for real-time broadcasts (thread events, message updates)
 - **Bull/Redis**: Existing queue infrastructure for async webhook processing
 - **TypeORM**: Follow existing entity patterns (snake_case columns, camelCase properties)
-- **message_read_status**: Works for external threads without changes
+- **message_read_status**: Works for external threads without changes (**TODO** research may need FK)
 - **Attachments**: MMS media and voicemail audio stored in existing `attachments` JSONB field
-- **Soft Deletes**: Use `deleted_at` on external threads (same as patient threads)
+- **Soft Deletes**: Use `deleted_at` on external threads (same as patient threads) (**TODO** research difference needed for patient threads, as those get deleted along with the patient record, which shouldn't be the case for SMS threads most likely?)
 
 ### Differentiation in UI
 
@@ -401,20 +406,20 @@ Admin UI to manage:
 ### Queue Architecture
 
 - **Queues**: `inbound_sms_queue`, `inbound_call_queue`, `transcription_queue`
-- **Workers**: NestJS processors using Bull
+- **Workers**: NestJS processors using BullMQ
 - **Retries**: Exponential backoff, dead-letter queue for failures
 
 ### Phone Number Handling
 
 - **Storage**: E.164 format (+15551234567)
 - **Display**: Regional formatting for UI (555) 123-4567
-- **Validation**: libphonenumber library for normalization
+- **Validation**: libphonenumber library for normalization (**TODO** research libraries/current implementation in UI if any)
 
 ### Media Handling
 
 **MMS (Images/Files)**
 
-- **Inbound**: Download from provider webhook, upload to S3, store signed URLs in `attachments` JSONB
+- **Inbound**: Download from provider webhook, upload to S3, store signed URLs in `attachments` JSONB (**TODO** research how this works currently)
 - **Outbound**: Upload to S3, pass URL to provider API
 
 **Voice Messages (Voicemail Playback)**
@@ -451,18 +456,18 @@ Admin UI to manage:
 - Build TelephonyService abstraction + provider implementation
 - Webhook handlers for inbound SMS/calls
 - External thread CRUD + message creation
-- Basic UI (separate from patient threads initially)
+- Basic UI (separate from patient threads, ignore assignment to patient/facility initially)
 
 ### Phase 3: Integration
 
 - Call bridging
 - Escalation system
 - Admin config UI
-- Unified inbox view (patient + external threads)
+- Unified inbox view (unread/unassigned external threads)
 
 ### Phase 4: Rollout
 
-- Soft launch with pilot customer
+- Soft launch with pilot facilities
 - Monitor metrics, gather feedback
 - Full rollout
 
@@ -561,8 +566,8 @@ export class NormalizedCallEvent {
 
 ### Benefits of This Approach
 
-- **Easy Swapping**: Change env var → redeploy → done
-- **No Vendor Lock-in**: Provider-specific details isolated to small modules
+- **Easy Swapping**: Add new provider specific APIs → Change env var → redeploy → done
+- **No Vendor Lock-in**: Provider-specific details isolated to smallest modules possible
 - **Future-Proof**: Can evaluate new providers without refactoring core application logic
 - **Testability**: Mock implementation for testing without provider dependencies
 
@@ -570,12 +575,9 @@ export class NormalizedCallEvent {
 
 ## Open Questions
 
-1. **Cost Tracking**: Display phone costs in admin UI only, or integrate with billing?
-2. **Clinician Phone Storage**: Allow saving clinician's phone number (encrypted), or always manual entry?
-3. **Transcription Fallback**: If transcription fails, retry or notify "transcription unavailable"?
-4. **Thread Merging**: Allow merging duplicate external threads, or just delete?
-5. **International**: Support non-US numbers, or US-only for MVP?
-6. **Rate Limiting**: Limit outbound SMS per clinician to prevent spam?
+1. **Transcription Fallback**: If transcription fails, retry or notify "transcription unavailable"?
+2. **International**: Support non-US numbers, or US-only for MVP?
+3. **Rate Limiting**: Limit outbound SMS per phone to prevent spam?  Display descriptive/helpful errors when one pool number is being used too much.
 
 ---
 
