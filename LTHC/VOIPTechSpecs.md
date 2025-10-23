@@ -21,7 +21,7 @@ Add phone and SMS capabilities to Platinum Line through managed phone number poo
 
 - **Unified Numbers**: All numbers can receive inbound calls/SMS AND serve as outbound caller ID
 - **Admin Managed**: Admins provision numbers manually (provider dashboard → add to Platinum Line UI)
-- **Labeling**: Admin assigns labels for organization ("Main Line", "After Hours")
+- **Labeling**: Admin assigns caller id labels for organization ("Main Line", "Clinician 1")
 - **Selection**: Clinicians choose caller ID from pool when making outbound calls
 
 ### Architecture Principles
