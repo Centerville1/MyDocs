@@ -151,12 +151,6 @@ export class PhoneNumber {
   @Column({ type: 'varchar', nullable: true })
   label?: string; // "Main Line", "After Hours"
 
-  @Column({ type: 'decimal', nullable: true })
-  monthlyCost?: number;
-
-  @Column({ type: 'boolean', default: true })
-  isPoolNumber: boolean; // available for outbound caller ID
-
   @Column({ type: 'varchar', nullable: true })
   providerSid?: string; // Provider's unique identifier for this number
 
