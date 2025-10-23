@@ -166,6 +166,8 @@ export class PhoneNumber {
 
 #### call_logs
 
+TBD if needed...
+
 ```typescript
 @Entity('call_logs')
 export class CallLog {
@@ -209,6 +211,8 @@ export class CallLog {
 ---
 
 #### voip_settings
+
+Might wrap into any existing system settings?  Or leave as constants not data driven...
 
 ```typescript
 @Entity('voip_settings')
