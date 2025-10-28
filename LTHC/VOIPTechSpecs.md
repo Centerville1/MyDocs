@@ -381,39 +381,126 @@ export class VoipSettings {
 
 ## Phone Number Management
 
+### Phone Number Provisioning Strategy
+
+The system uses a **manual provisioning workflow** to keep the implementation simple and provider-agnostic. This approach avoids reinventing the wheel by leveraging the provider's existing dashboard for purchasing and initial configuration.
+
+#### Adding a Phone Number (Two-Step Process)
+
+**Step 1: Provision in Provider Dashboard (e.g., Twilio)**
+
+1. Admin logs into Twilio console (or other provider)
+2. Purchase a phone number with desired area code/capabilities
+3. Configure webhooks for the number:
+   - **SMS Webhook URL**: `https://{your-api-domain}/api/v1/webhooks/twilio/sms` (POST)
+   - **Voice Webhook URL**: `https://{your-api-domain}/api/v1/webhooks/twilio/call` (POST)
+   - **Status Callback URL**: `https://{your-api-domain}/api/v1/webhooks/twilio/status` (POST)
+4. Note the provider's SID for the number (e.g., `PN1234567890abcdef1234567890abcdef`)
+
+**Step 2: Add to Platinum Line**
+
+1. Admin navigates to Phone Numbers section in Platinum Line UI
+2. Clicks "Add Phone Number"
+3. Enters required information:
+   - **Number** (E.164 format): `+15551234567`
+   - **Label** (friendly name): `"Main Line"`, `"After Hours"`, etc.
+   - **Provider SID** (from Step 1): `PN1234567890abcdef1234567890abcdef`
+   - **Site Grouping** (optional): Select organization (null = system-wide)
+4. System validates E.164 format and checks for duplicates
+5. Number is now available for external threads
+
+**API Endpoint:**
+
+```http
+POST /api/v1/phone-numbers
+Content-Type: application/json
+Authorization: Bearer {token}
+
+{
+  "number": "+15551234567",
+  "label": "Main Line",
+  "providerSid": "PN1234567890abcdef1234567890abcdef",
+  "siteGroupingId": 1  // or null for system-wide
+}
+```
+
+#### Why Manual Provisioning?
+
+- **Provider-Agnostic**: Works with any VoIP provider without custom integrations
+- **Simplicity**: No need to replicate provider's search/purchase UI
+- **Flexibility**: Admins can use provider's advanced features (vanity numbers, number porting, etc.)
+- **Reliability**: No dependency on provider API availability for number purchases
+- **Cost Control**: Manual approval prevents automated over-provisioning
+
+#### Viewing and Filtering Numbers
+
+**Get All Numbers:**
+
+```http
+GET /api/v1/phone-numbers
+```
+
+**Filter by Site Grouping:**
+
+```http
+GET /api/v1/phone-numbers?siteGroupingId=1
+GET /api/v1/phone-numbers?siteGroupingId=null  # System-wide numbers
+```
+
+**Check Usage Before Deletion:**
+
+```http
+GET /api/v1/phone-numbers/123/usage-count
+# Returns: number of external threads using this number
+```
+
+---
+
 ### Phone Number Deletion Strategy
 
 When an administrator needs to deallocate a phone number from the telephony provider (to reduce costs), the system uses a **delete-with-replacement** approach to maintain data integrity and conversation continuity.
 
 #### Deletion Flow
 
-1. **Admin initiates deletion** of phone number A
-2. **System checks usage**: Query all active external threads using this number
+1. **Admin checks usage** via API or UI:
+   - `GET /api/v1/phone-numbers/{id}/usage-count`
+   - Returns count of external threads using this number
+2. **System requires replacement** if number is in use:
+   - If 0 threads: deletion proceeds immediately
+   - If > 0 threads: admin MUST provide a replacement number
 3. **UI displays warning**:
    - "This phone number is currently used by X active thread(s)"
    - "Select a replacement number to reassign these threads"
    - "⚠️ Warning: External contacts will see this as a new phone number"
 4. **Admin selects replacement** number B from available pool (same site grouping)
 5. **System processes deletion**:
-   - Update all affected threads: `phoneNumberId = B.id`
-   - Create system message in each thread: "Phone number changed from [old] to [new]. External contacts will see this as a new number. Please reintroduce yourself in your next message."
-   - Deallocate number A from telephony provider via `TelephonyProvider.releasePhoneNumber()`
-   - Delete number A from database
-6. **External contact impact**: Next time they receive a message, it comes from a different number (appears as new conversation to them)
+   - Validates replacement number exists and is in same site grouping
+   - Updates all affected threads: `phoneNumberId = B.id`
+   - Deletes number A from Platinum Line database
+   - Returns success with affected thread count
+6. **Admin manually releases in provider**: Admin should then release the number in Twilio/provider dashboard to stop billing
+7. **External contact impact**: Next time they receive a message, it comes from a different number (appears as new conversation to them)
 
-#### Database-Level Protection
+**API Endpoint:**
 
-The foreign key constraint uses `ON DELETE RESTRICT` to prevent accidental deletions:
+```http
+DELETE /api/v1/phone-numbers/123
+Content-Type: application/json
+Authorization: Bearer {token}
 
-```sql
-ALTER TABLE external_threads
-ADD CONSTRAINT fk_external_threads_phone_number
-FOREIGN KEY (phone_number_id)
-REFERENCES phone_numbers(id)
-ON DELETE RESTRICT;
+{
+  "replacementPhoneNumberId": 456  // Required if number is in use
+}
 ```
 
-This ensures administrators MUST provide a replacement number before deletion can proceed.
+**Response:**
+
+```json
+{
+  "affectedThreadsCount": 5,
+  "message": "Phone number deleted and 5 thread(s) reassigned to replacement number"
+}
+```
 
 #### Multi-Tenant Validation
 
@@ -421,6 +508,7 @@ When deleting/replacing numbers:
 - Replacement number must belong to same `siteGroupingId` as deleted number
 - SITE_ADMIN users can only delete/manage numbers from their assigned site grouping(s)
 - System prevents cross-tenant number reassignment
+- System prevents self-replacement (replacement ID cannot equal deleted ID)
 
 ---
 
