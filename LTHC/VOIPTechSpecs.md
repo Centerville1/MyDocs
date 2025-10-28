@@ -31,13 +31,12 @@ Add phone and SMS capabilities to Platinum Line through managed phone number poo
 - **Real-time Updates**: Leverage existing Socket.IO (ChatGateway) for thread/message broadcasts
 - **Minimal Schema Changes**: Reuse existing patterns (soft deletes, JSONB metadata, TypeORM conventions)
 
-
 ### Mock-ups
 
 [CC Platinum Line Figma](https://www.figma.com/design/rVORtmqIMrMbf5tk7Btpbb/LTHC-Mockup?node-id=0-1&t=NgSuAK66aGqHEiqp-1)
 
 - New SMS threads and unified SMS inbox for unread/unassigned external threads
-<img width="349" height="737" alt="Screenshot 2025-10-22 at 19 55 40" src="https://github.com/user-attachments/assets/4248d0cd-2e27-4a4a-9a48-8dd0f65bc1f7" />
+  <img width="349" height="737" alt="Screenshot 2025-10-22 at 19 55 40" src="https://github.com/user-attachments/assets/4248d0cd-2e27-4a4a-9a48-8dd0f65bc1f7" />
 
 ---
 
@@ -45,14 +44,21 @@ Add phone and SMS capabilities to Platinum Line through managed phone number poo
 
 ### Schema Changes to Existing Tables
 
-#### messages (add single column)
+#### messages (schema changes)
 
 ```sql
+-- Make thread_id nullable (messages can belong to either patient threads or external threads)
+ALTER TABLE public.messages ALTER COLUMN thread_id DROP NOT NULL;
+
+-- Make sender_id nullable (external contacts don't have user accounts)
+ALTER TABLE public.messages ALTER COLUMN sender_id DROP NOT NULL;
+
+-- Add external_thread_id column
 ALTER TABLE public.messages ADD COLUMN external_thread_id int8;
 ALTER TABLE public.messages ADD CONSTRAINT fk_messages_external_thread
   FOREIGN KEY (external_thread_id) REFERENCES public.external_threads(id);
 
--- Constraint: message belongs to EITHER thread_id OR external_thread_id
+-- Constraint: message belongs to EITHER thread_id OR external_thread_id (not both, not neither)
 ALTER TABLE public.messages ADD CONSTRAINT chk_thread_xor_external_thread
   CHECK ((thread_id IS NOT NULL AND external_thread_id IS NULL) OR
          (thread_id IS NULL AND external_thread_id IS NOT NULL));
@@ -60,11 +66,11 @@ ALTER TABLE public.messages ADD CONSTRAINT chk_thread_xor_external_thread
 
 **Reuse existing fields for VOIP:**
 
-- `message_type`: extend enum to include `'sms'`, `'voicemail'`, `'call_log'`
-- `content`: SMS body or voicemail transcription
-- `sender_id`: user_id for outbound, null for inbound
-- `meta_data`: JSONB stores provider message IDs, delivery status, transcription confidence, etc.
-- `attachments`: MMS media URLs (existing pattern)
+- `message_type`: extend enum to include `'sms'` for SMS messages. Voicemails and call logs use `'system'` type (following existing project pattern)
+- `content`: SMS body or voicemail transcription, or call summary (e.g., "Call duration: 45s")
+- `sender_id`: user_id for outbound messages, **NULL for inbound messages** (external contacts don't have user accounts)
+- `meta_data`: JSONB stores provider message IDs, delivery status, transcription confidence, call metadata, etc.
+- `attachments`: MMS media URLs and voicemail audio files (existing pattern)
 
 #### message_read_status (no changes needed)
 
@@ -91,8 +97,11 @@ export class ExternalThread {
   @Column({ type: 'varchar', nullable: true })
   contactName?: string; // user-assigned label
 
-  @Column({ type: 'varchar', nullable: true })
-  fromContact?: string; // OUR number/email for outbound consistency
+  @Column({ type: 'int8', nullable: true })
+  phoneNumberId?: number; // Reference to phone_numbers (for voip threads)
+
+  @ManyToOne(() => PhoneNumber, { onDelete: 'RESTRICT' })
+  phoneNumber?: PhoneNumber;
 
   @Column({ type: 'int8', nullable: true })
   @ManyToOne(() => Facility)
@@ -100,9 +109,6 @@ export class ExternalThread {
 
   @Column({ type: 'int8', array: true, default: [] })
   patientIds: number[]; // array of linked patient IDs
-
-  @Column({ type: 'varchar', default: 'open' })
-  status: string;
 
   @Column({ type: 'int8', nullable: true })
   @ManyToOne(() => User)
@@ -139,6 +145,8 @@ CREATE INDEX idx_external_threads_contact ON external_threads (external_contact,
 
 #### phone_numbers
 
+Managed pool of phone numbers with multi-tenant isolation via site groupings.
+
 ```typescript
 @Entity('phone_numbers')
 export class PhoneNumber {
@@ -154,6 +162,12 @@ export class PhoneNumber {
   @Column({ type: 'varchar', nullable: true })
   providerSid?: string; // Provider's unique identifier for this number
 
+  @Column({ type: 'int8', nullable: true })
+  siteGroupingId?: number; // White-label organization owner (null = system-wide)
+
+  @ManyToOne(() => SiteGrouping)
+  siteGrouping?: SiteGrouping;
+
   @CreateDateColumn()
   createdAt: Date;
 
@@ -162,15 +176,21 @@ export class PhoneNumber {
 }
 ```
 
+**Multi-Tenancy Notes:**
+- Numbers with `siteGroupingId = null` are system-wide (legacy/current production state)
+- When white-label partners onboard, their phone numbers are assigned to their `siteGroupingId`
+- SITE_ADMIN users only see numbers from their assigned site grouping(s)
+- SYSTEM_ADMIN users see all numbers across all organizations
+
 ---
 
-#### call_logs
+#### phone_call_logs
 
-TBD if needed...
+Stores complete audit trail of all calls (inbound and outbound). Links to `phone_numbers` table for our pool numbers while preserving number strings for historical accuracy.
 
 ```typescript
-@Entity('call_logs')
-export class CallLog {
+@Entity('phone_call_logs')
+export class PhoneCallLog {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -178,17 +198,18 @@ export class CallLog {
   @ManyToOne(() => ExternalThread)
   externalThreadId: number;
 
-  @Column({ type: 'varchar' })
-  direction: string; // 'inbound', 'outbound_bridged'
+  @Column({ type: 'boolean' })
+  outbound: boolean; // true = outbound call, false = inbound call
 
   @Column({ type: 'varchar' })
-  fromNumber: string; // E.164
+  externalNumber: string; // E.164 - external contact's number
 
   @Column({ type: 'varchar' })
-  toNumber: string; // E.164
+  internalNumber: string; // E.164 - our pool number
 
-  @Column({ type: 'varchar', nullable: true })
-  callerIdNumber?: string; // E.164, for bridged calls
+  @Column({ type: 'int8', nullable: true })
+  @ManyToOne(() => PhoneNumber, { onDelete: 'SET NULL' })
+  internalNumberId?: number; // FK to phone_numbers for joins/reporting
 
   @Column({ type: 'int', nullable: true })
   durationSeconds?: number;
@@ -212,7 +233,7 @@ export class CallLog {
 
 #### voip_settings
 
-Might wrap into any existing system settings?  Or leave as constants not data driven...
+Might wrap into any existing system settings? Or leave as constants not data driven...
 
 ```typescript
 @Entity('voip_settings')
@@ -284,12 +305,12 @@ export class VoipSettings {
    - Call TelephonyService.getTranscription()
    - Find/create external thread (same logic as SMS)
    - Create message record:
-     - `message_type` = 'voicemail'
-     - `content` = transcription text (or empty if transcription fails)
+     - `message_type` = 'system' (follows existing project pattern for system-generated messages)
+     - `content` = transcription text (or "Voicemail received" if transcription fails)
      - `attachments` = [{ type: 'audio', url: s3_signed_url, duration }]
-     - `meta_data` = { recording_url, duration, transcription_confidence, provider_call_id }
+     - `meta_data` = { messageSubType: 'voicemail', recording_url, duration, transcription_confidence, provider_call_id }
    - Send auto-reply if not already sent
-   - Create entry in `call_logs`
+   - Create entry in `phone_call_logs`
    - Start escalation timer, notify clinicians
 
 ---
@@ -320,25 +341,86 @@ export class VoipSettings {
 
 ### Call Bridging (Outbound) Flow
 
-1. **Initiation**
+**Flow**: Clinician calls Twilio number from their cell phone → Twilio bridges to destination
+
+1. **Setup/Configuration**
+
+   - Admin configures which Twilio numbers are for call bridging
+   - Each external thread can have a designated "bridge number" or use default
+   - Clinician's phone number stored in their user profile
+
+2. **Initiation**
 
    - Clinician clicks "Call" button in thread
-   - Modal asks for:
-     - Clinician's phone number (E.164) (defaults to number stored in profile)
-     - Caller ID to display (dropdown from `phone_numbers`)
-   - POST `/api/external-threads/{id}/bridge-call`
+   - UI displays instructions:
+     - "Call [Twilio Number] from your phone [Clinician's Phone]"
+     - Shows which caller ID will be displayed to destination
+   - Optionally, POST `/api/external-threads/{id}/prepare-bridge-call` to:
+     - Create pending bridge request record
+     - Store clinician number, destination, and caller ID
+     - Return bridge instructions to display in UI
 
-2. **Backend**
+3. **Call Execution**
 
-#### Needs updating to use call bridging, not automatic calling of clinician most likely!!
+   - Clinician manually dials the Twilio number from their cell phone
+   - Twilio webhook receives inbound call
+   - Backend verifies caller matches authorized clinician
+   - TelephonyService.initiateBridgeCall() generates TwiML response
+   - Twilio bridges clinician to destination number
+   - Selected caller ID is displayed to destination (not clinician's personal number)
 
-   - Call TelephonyService.initiateBridgeCall()
-   - Provider initiates two-leg call:
-     - **Leg A**: Call clinician (private/restricted caller ID)
-     - **Leg B**: When clinician answers, dial destination (show selected caller ID)
-   - Create entry in `call_logs` (status: 'initiated')
+4. **Call Lifecycle**
+
+   - Create entry in `phone_call_logs` (status: 'initiated')
    - Webhooks update call status throughout lifecycle
-   - On completion: create message record (type: 'call_log', content: "Call duration: Xs")
+   - On completion: create message record (type: 'system', content: "Call duration: Xs", meta_data: { messageSubType: 'call_log', phone_call_log_id, ... })
+
+**Note**: This approach masks the clinician's personal phone number while allowing them to place calls from their personal device.
+
+---
+
+## Phone Number Management
+
+### Phone Number Deletion Strategy
+
+When an administrator needs to deallocate a phone number from the telephony provider (to reduce costs), the system uses a **delete-with-replacement** approach to maintain data integrity and conversation continuity.
+
+#### Deletion Flow
+
+1. **Admin initiates deletion** of phone number A
+2. **System checks usage**: Query all active external threads using this number
+3. **UI displays warning**:
+   - "This phone number is currently used by X active thread(s)"
+   - "Select a replacement number to reassign these threads"
+   - "⚠️ Warning: External contacts will see this as a new phone number"
+4. **Admin selects replacement** number B from available pool (same site grouping)
+5. **System processes deletion**:
+   - Update all affected threads: `phoneNumberId = B.id`
+   - Create system message in each thread: "Phone number changed from [old] to [new]. External contacts will see this as a new number. Please reintroduce yourself in your next message."
+   - Deallocate number A from telephony provider via `TelephonyProvider.releasePhoneNumber()`
+   - Delete number A from database
+6. **External contact impact**: Next time they receive a message, it comes from a different number (appears as new conversation to them)
+
+#### Database-Level Protection
+
+The foreign key constraint uses `ON DELETE RESTRICT` to prevent accidental deletions:
+
+```sql
+ALTER TABLE external_threads
+ADD CONSTRAINT fk_external_threads_phone_number
+FOREIGN KEY (phone_number_id)
+REFERENCES phone_numbers(id)
+ON DELETE RESTRICT;
+```
+
+This ensures administrators MUST provide a replacement number before deletion can proceed.
+
+#### Multi-Tenant Validation
+
+When deleting/replacing numbers:
+- Replacement number must belong to same `siteGroupingId` as deleted number
+- SITE_ADMIN users can only delete/manage numbers from their assigned site grouping(s)
+- System prevents cross-tenant number reassignment
 
 ---
 
@@ -349,8 +431,8 @@ export class VoipSettings {
 - **Patient Linking**: UI allows searching/linking multiple patients → updates `patient_ids` array
 - **Facility Linking**: Dropdown to set `facility_id`, null if patient_ids has a value.
 - **Contact Naming**: Assign friendly name → updates `contact_name`
-- **Assignment**: Use `assignee_id` (same as patient threads) (**TODO** research current implementation in threads)
-- **Status**: 'open', 'resolved', 'closed' (filters default view) (**TODO** research current implementation in threads)
+- **Assignment**: Use `assignee_id` (same as patient threads)
+- **Phone Number Selection**: For voip threads, select from available phone numbers (filtered by site grouping for SITE_ADMIN)
 
 ### Viewing Threads
 
@@ -447,7 +529,7 @@ Admin UI to manage:
 
 ### Phase 1: Schema
 
-- Create `external_threads`, `phone_numbers`, `call_logs`, `voip_settings` tables
+- Create `external_threads`, `phone_numbers`, `phone_call_logs`, `voip_settings` tables
 - Add `external_thread_id` column to `messages`
 - Run migrations in staging, verify integrity
 
@@ -577,7 +659,7 @@ export class NormalizedCallEvent {
 
 1. **Transcription Fallback**: If transcription fails, retry or notify "transcription unavailable"?
 2. **International**: Support non-US numbers, or US-only for MVP?
-3. **Rate Limiting**: Limit outbound SMS per phone to prevent spam?  Display descriptive/helpful errors when one pool number is being used too much.
+3. **Rate Limiting**: Limit outbound SMS per phone to prevent spam? Display descriptive/helpful errors when one pool number is being used too much.
 
 ---
 
